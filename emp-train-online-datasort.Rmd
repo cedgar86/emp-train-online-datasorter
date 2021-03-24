@@ -1,0 +1,271 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+
+library("dplyr")
+library("tidyr")
+
+```
+
+=================================================================================================================================================================
+=================================================================================================================================================================
+PART 1 scoring
+
+Select only columns relevant to video ratings from empathy_main_data df (starting with either 'p4_' or 'p8_'), attach part IDs as well.
+
+```{r}
+
+vidratings_df <- empathy_main_data_fullcomplete %>% select(starts_with("p4_"))
+
+vidratings_df$proID <- empathy_main_data_fullcomplete$p3_prolific_id
+
+prolificIDs <- empathy_main_data_fullcomplete$p3_prolific_id
+
+proIDschck <- empathy_main_data_fullcomplete$p3_prolific_id
+
+expIDs <- empathy_main_data_fullcomplete$p1_part1_expt_id
+```
+
+
+Gather ratings into df:
+
+
+```{r}
+
+
+ratecols_df <- vidratings_df %>% select(contains("offline_assessment_resp"))
+
+ratecols_names <- colnames(ratecols_df)
+
+ratecols_df$proID <- vidratings_df$proID
+
+
+```
+
+
+Gather stimulus_id into df:
+
+
+```{r}
+
+
+vidIDcols_df <- vidratings_df %>% select(contains("stimulus_id"))
+
+vidIDcols_names <- colnames(vidIDcols_df)
+
+vidIDcols_df$proID <- vidratings_df$proID
+
+
+```
+
+
+Gather rating_type into df:
+
+
+```{r}
+
+
+ratingtype_df <- vidratings_df %>% select(contains("rating_type"))
+
+ratingtype_names <- colnames(ratingtype_df)
+
+ratingtype_df$proID <- vidratings_df$proID
+
+
+```
+
+Convert each df to long form
+
+```{r}
+
+ratecols_dflong <- ratecols_df %>%
+  pivot_longer(
+    cols = ratecols_names,
+    names_to = "trial",
+    values_to = "rating"
+  )
+
+vidID_dflong <- vidIDcols_df %>%
+  pivot_longer(
+    cols = vidIDcols_names,
+    names_to = "trial",
+    values_to = "video_id"
+  )
+
+ratingtype_dflong <- ratingtype_df %>%
+  pivot_longer(
+    cols = ratingtype_names,
+    names_to = "trial",
+    values_to = "rating_type"
+  )
+
+
+```
+
+Extract value columns from long df's and combine them into long version of vidratings:
+
+```{r}
+
+vidratings_dflong <- data.frame(ratecols_dflong$proID, vidID_dflong$video_id, ratingtype_dflong$rating_type, ratecols_dflong$rating)
+
+vidratings_dflong$vid_type <- ifelse(grepl("E_", vidratings_dflong$vidID_dflong.video_id), "emo", "con")
+
+vidratings_dflong$rating_type <- ifelse(vidratings_dflong$ratingtype_dflong.rating_type == 1, "other", "self") # corrected - =====swapped other and self around=====
+
+names(vidratings_dflong)[names(vidratings_dflong) == 'vidID_dflong.video_id'] <- 'video_id'
+
+names(vidratings_dflong)[names(vidratings_dflong) == 'ratecols_dflong.rating'] <- 'affect_rating'
+
+names(vidratings_dflong)[names(vidratings_dflong) == 'ratecols_dflong.proID'] <- 'proID'
+
+vidratings_dflong = subset(vidratings_dflong, select = -c(ratingtype_dflong.rating_type) )
+
+```
+
+Nested for loops that extract actor ratings from the actorratings df and append them as a column to the vidratings_dflong df:
+
+
+```{r}
+
+actor_ratings <- vector(mode = "list")
+
+for (row1 in 1:nrow(vidratings_dflong)){
+
+  vid_id1 = vidratings_dflong$video_id[row1]
+
+  for (row2 in 1:nrow(actorratings)){
+    vid_id2 = actorratings$IanCode_online[row2]
+    actor_rating = actorratings$ActorMedRate[row2]
+
+    if(vid_id1 == vid_id2){
+    actor_ratings = c(actor_ratings, actor_rating)
+    }
+  }
+}
+
+vidratings_dflong$actor_ratings <- actor_ratings
+
+vidratings_dflong$actor_ratings <- as.numeric(vidratings_dflong$actor_ratings) # convert actor_ratings column to numeric type
+
+vidratings_dflong_T1 <- vidratings_dflong
+#write.csv(vidratings_dflong, "vidratings_dflong_T1")
+
+```
+
+Final code chunk uses a for loop to subset data for each participant, for each of the four conditions and calculate median affect ratings, which are then inserted into a summary df:
+
+
+
+```{r}
+
+# Create empty vectors to populate with various scores
+
+emo_self_ratings <- vector()
+emo_other_ratings <- vector()
+con_self_ratings <- vector()
+con_other_ratings <- vector()
+
+emo_self_actorratings <- vector()
+emo_other_actorratings <- vector()
+con_self_actorratings<- vector()
+con_other_actorratings <- vector()
+
+# emo vids empathy ratings:
+affemp_emo_scrs <- vector()
+affshr_emo_scrs <- vector()
+emoID_emo_scrs <- vector()
+
+# con vids empathy ratings
+affemp_con_scrs <- vector()
+affshr_con_scrs <- vector()
+emoID_con_scrs <- vector()
+
+
+for (id in prolificIDs){
+
+  # This set of filters creates a df for pariticpants' ratings in each of the four conditions:
+
+  emo_self_df <- filter(vidratings_dflong, proID == id, vid_type == "emo", rating_type == "self")
+  emo_other_df <- filter(vidratings_dflong, proID == id, vid_type == "emo", rating_type == "other")
+  con_self_df <- filter(vidratings_dflong, proID == id, vid_type == "con", rating_type == "self")
+  con_other_df <- filter(vidratings_dflong, proID == id, vid_type == "con", rating_type == "other")
+
+  # The next two blocks of code simply calculate the mean and median for affect ratings in each of the four conditions, for each participant:
+
+  #mean
+  emo_self_mean <- as.numeric(median(emo_self_df$affect_rating))
+  emo_other_mean <- as.numeric(median(emo_other_df$affect_rating))
+  con_self_mean <- as.numeric(median(con_self_df$affect_rating))
+  con_other_mean <- as.numeric(median(con_other_df$affect_rating))
+  
+  emo_self_actrate <- as.numeric(median(emo_self_df$actor_ratings)) * 10
+  emo_other_actrate <- as.numeric(median(emo_other_df$actor_ratings)) * 10
+  con_self_actrate <- as.numeric(median(con_self_df$actor_ratings)) * 10
+  con_other_actrate <- as.numeric(median(con_other_df$actor_ratings)) * 10
+
+  # emo vids empathy ratings:
+  affemp_emo <- abs(emo_self_actrate - emo_self_mean)
+  affshr_emo <- abs(emo_other_mean - emo_self_mean)
+  emoID_emo <- abs(emo_other_actrate - emo_other_mean)
+
+  # con vids empathy ratings
+  affemp_con <- abs(con_self_actrate - con_self_mean)
+  affshr_con <- abs(con_other_mean - con_self_mean)
+  emoID_con <- abs(con_other_actrate - con_other_mean)
+  
+  
+  # Add values to variable vectors:
+  
+  emo_self_ratings <- c(emo_self_ratings, emo_self_mean)
+  emo_other_ratings <- c(emo_other_ratings, emo_other_mean)
+  con_self_ratings <- c(con_self_ratings, con_self_mean)
+  con_other_ratings <- c(con_other_ratings, con_other_mean)
+  
+  emo_self_actorratings <- c(emo_self_actorratings, emo_self_actrate)
+  emo_other_actorratings <- c(emo_other_actorratings, emo_other_actrate)
+  con_self_actorratings <- c(con_self_actorratings, con_self_actrate)
+  con_other_actorratings <- c(con_other_actorratings, con_other_actrate)
+  
+  affemp_emo_scrs <- c(affemp_emo_scrs, affemp_emo)
+  affshr_emo_scrs <- c(affshr_emo_scrs, affshr_emo)
+  emoID_emo_scrs <- c(emoID_emo_scrs, emoID_emo)
+
+  affemp_con_scrs <- c(affemp_con_scrs, affemp_con)
+  affshr_con_scrs <- c(affshr_con_scrs, affshr_con)
+  emoID_con_scrs <- c(emoID_con_scrs, emoID_con)
+
+
+}
+
+#create list of labels for column names
+
+ratings_colnames <- c("proID", "expIds", "emo_self_mean_T1", "emo_other_mean_T1", "con_self_mean_T1", "con_other_mean_T1", "emo_affective_empathy_T1", "emo_affect_sharing_T1", "emo_emotion_ID_T1", "con_affective_empathy_T1", "con_affect_sharing_T1", "con_emotion_ID_T1", "emo_self_act_rate_T1", "emo_other_act_rate_T1", "con_self_act_rate_T1", "con_other_act_rate_T1")
+
+# build df using all of the vectors
+
+ratingsT1_df <- data.frame(prolificIDs, expIDs, emo_self_ratings, emo_other_ratings, con_self_ratings, con_other_ratings, affemp_emo_scrs, affshr_emo_scrs, emoID_emo_scrs, affemp_con_scrs, affshr_con_scrs, emoID_con_scrs, emo_self_actorratings, emo_other_actorratings,con_self_actorratings, con_other_actorratings)
+
+#assign column names
+
+colnames(ratingsT1_df) <- ratings_colnames
+
+
+write.csv(ratingsT1_df, "ratingsT1_median_df.csv", col.names = TRUE)
+
+View(ratingsT1_df)
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
